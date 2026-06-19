@@ -126,7 +126,9 @@ export async function discoverAllClients(opts = {}) {
  * @param {{ onProgress?: (msg: string) => void }} [opts]
  * @returns {Promise<{ ip: string, code: string, name: string, wsPort: number } | null>}
  */
-export async function discoverClient(opts = {}) {
+export async function findClientByCode(code, opts = {}) {
+  const normalized = String(code || '').toUpperCase();
+  if (normalized.length !== 6) return null;
   const all = await discoverAllClients(opts);
-  return all[0] || null;
+  return all.find((c) => c.code === normalized) || null;
 }

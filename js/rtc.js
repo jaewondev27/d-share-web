@@ -11,7 +11,10 @@ export class RtcSession {
     this.role = role;
     this.signaling = signaling;
     this.clientCode = clientCode;
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    this.pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS,
+      bundlePolicy: 'max-bundle',
+    });
     this.controlChannel = null;
     this.remoteStream = new MediaStream();
     this.onRemoteStream = null;
@@ -120,9 +123,23 @@ export class RtcSession {
     }
   }
 
+  async _tuneVideoSender() {
+    if (this.role !== 'host') return;
+    const sender = this.pc.getSenders().find((s) => s.track?.kind === 'video');
+    if (!sender) return;
+    try {
+      const params = sender.getParameters();
+      if (!params.encodings?.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate = 4_000_000;
+      params.encodings[0].maxFramerate = 30;
+      await sender.setParameters(params);
+    } catch { /* ignore */ }
+  }
+
   async createOffer() {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
+    await this._tuneVideoSender();
     this.signaling.sendOffer(this.pc.localDescription, this.clientCode || undefined);
   }
 

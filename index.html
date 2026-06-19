@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./css/host.css" />
   <script type="importmap">{ "imports": { "@material/web/": "https://esm.run/@material/web@2.2.0/" } }</script>
+  <script src="./js/native-bridge.js"></script>
   <script type="module" src="./js/m3-setup.js"></script>
 </head>
 <body>
@@ -23,15 +24,12 @@
 
       <div class="form-stack">
         <md-outlined-text-field id="client-ip-input" label="클라이언트 IP" placeholder="자동 검색 실패 시 입력" inputmode="decimal" style="display:none"></md-outlined-text-field>
-        <md-outlined-text-field id="code-input" label="6자리 코드" placeholder="자동 입력됨"></md-outlined-text-field>
+        <md-outlined-text-field id="code-input" label="6자리 코드" placeholder="자동 입력 또는 직접 입력"></md-outlined-text-field>
         <button class="pill-btn" id="share-btn">화면 공유 시작</button>
       </div>
 
       <p class="hint-text" id="https-hint" style="margin-top:20px;color:#5b58e7">
         같은 Wi-Fi · 별도 서버 없이 LAN 직접 연결
-      </p>
-      <p class="hint-text" style="margin-top:8px;font-size:12px;color:#aaa">
-        Chrome에서「로컬 네트워크 접근」허용이 필요할 수 있습니다.
       </p>
     </section>
 
