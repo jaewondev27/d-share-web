@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D-Share — 호스트</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet" />
+  <meta name="dshare-relay" content="wss://d-share-signaling.onrender.com" />
+  <link rel="stylesheet" href="./css/host.css" />
+  <script type="importmap">{ "imports": { "@material/web/": "https://esm.run/@material/web@2.2.0/" } }</script>
+  <script type="module" src="./js/m3-setup.js"></script>
+</head>
+<body>
+  <div class="app-shell" id="host-app">
+    <button class="settings-fab" id="settings-btn" title="설정"><i data-lucide="settings"></i></button>
+
+    <section class="screen-center" id="idle-panel">
+      <h1 class="device-name" id="host-name-display">호스트</h1>
+      <p class="hint-text" style="margin-top:12px">클라이언트 앱에 표시된 <strong>6자리 코드</strong>만 입력하세요.<br>화면·소리를 공유합니다.</p>
+
+      <div class="form-stack">
+        <md-outlined-text-field id="client-ip-input" label="클라이언트 IP" placeholder="192.168.0.10" inputmode="decimal" style="display:none"></md-outlined-text-field>
+        <md-outlined-text-field id="code-input" label="6자리 코드" placeholder="예: KOYXCZ"></md-outlined-text-field>
+        <button class="pill-btn" id="share-btn">화면 공유 시작</button>
+      </div>
+
+      <p class="hint-text" id="https-hint" style="margin-top:20px;color:#5b58e7">
+        클라이언트 앱의 <strong>6자리 코드</strong>만 입력하세요. (릴레이 경유)
+      </p>
+    </section>
+
+    <section class="screen-center panel-hidden" id="live-panel">
+      <div class="sharing-badge"><span class="rec-dot"></span> 공유 중</div>
+      <h1 class="device-name" id="sharing-title"></h1>
+      <p class="status-text" id="sharing-to"></p>
+      <p class="hint-text">클라이언트에서 화면을 보고 있습니다.</p>
+    </section>
+
+    <div class="control-bar panel-hidden" id="host-control-bar">
+      <button class="bar-btn" id="stop-btn"><i data-lucide="unplug"></i> 연결 해제</button>
+    </div>
+  </div>
+  <script type="module" src="./js/host.js"></script>
+</body>
+</html>
