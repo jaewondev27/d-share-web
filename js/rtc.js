@@ -7,9 +7,10 @@ function toSessionDescription(sdp) {
 }
 
 export class RtcSession {
-  constructor(role, signaling) {
+  constructor(role, signaling, clientCode = '') {
     this.role = role;
     this.signaling = signaling;
+    this.clientCode = clientCode;
     this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.controlChannel = null;
     this.remoteStream = new MediaStream();
@@ -33,7 +34,7 @@ export class RtcSession {
 
     this.pc.onicecandidate = (ev) => {
       if (ev.candidate) {
-        this.signaling.sendIceCandidate(ev.candidate.toJSON());
+        this.signaling.sendIceCandidate(ev.candidate.toJSON(), this.clientCode || undefined);
       }
     };
 
@@ -58,8 +59,14 @@ export class RtcSession {
     );
   }
 
+  _matchesCode(msg) {
+    const c = (msg.code || '').toUpperCase();
+    if (!this.clientCode) return true;
+    return !c || c === this.clientCode.toUpperCase();
+  }
+
   async _onOffer(msg) {
-    if (this.role !== 'client') return;
+    if (this.role !== 'client' || !this._matchesCode(msg)) return;
     const desc = toSessionDescription(msg.sdp);
     if (!desc) return;
     await this.pc.setRemoteDescription(desc);
@@ -71,7 +78,7 @@ export class RtcSession {
   }
 
   async _onAnswer(msg) {
-    if (this.role !== 'host') return;
+    if (this.role !== 'host' || !this._matchesCode(msg)) return;
     const desc = toSessionDescription(msg.sdp);
     if (!desc) return;
     await this.pc.setRemoteDescription(desc);
@@ -80,6 +87,7 @@ export class RtcSession {
   }
 
   async _onIce(msg) {
+    if (!this._matchesCode(msg)) return;
     const candidate = msg.candidate;
     if (!candidate) return;
     if (!this._remoteSet) {
@@ -115,7 +123,7 @@ export class RtcSession {
   async createOffer() {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
-    this.signaling.sendOffer(this.pc.localDescription);
+    this.signaling.sendOffer(this.pc.localDescription, this.clientCode || undefined);
   }
 
   sendControl(msg) {

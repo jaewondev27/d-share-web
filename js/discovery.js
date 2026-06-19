@@ -82,25 +82,30 @@ function buildScanList(localIps) {
 }
 
 /**
- * @param {{ onProgress?: (msg: string) => void }} [opts]
- * @returns {Promise<{ ip: string, code: string, name: string, wsPort: number } | null>}
+ * @param {{ onProgress?: (msg: string) => void, excludeCodes?: Set<string> }} [opts]
+ * @returns {Promise<Array<{ ip: string, code: string, name: string, wsPort: number }>>}
  */
-export async function discoverClient(opts = {}) {
-  const { onProgress } = opts;
+export async function discoverAllClients(opts = {}) {
+  const { onProgress, excludeCodes = new Set() } = opts;
   const report = (msg) => onProgress?.(msg);
+  const found = new Map();
+
+  const addHit = (hit) => {
+    if (!hit || excludeCodes.has(hit.code)) return;
+    found.set(hit.code, hit);
+    localStorage.setItem('dshare-client-ip', hit.ip);
+  };
 
   const qIp = new URLSearchParams(location.search).get('ip');
   if (qIp && isPrivateIp(qIp)) {
     report('클라이언트 확인 중…');
-    const hit = await probeClient(qIp);
-    if (hit) return hit;
+    addHit(await probeClient(qIp));
   }
 
   const saved = localStorage.getItem('dshare-client-ip');
   if (saved && isPrivateIp(saved)) {
     report('저장된 기기 확인 중…');
-    const hit = await probeClient(saved);
-    if (hit) return hit;
+    addHit(await probeClient(saved));
   }
 
   report('네트워크 확인 중…');
@@ -108,14 +113,20 @@ export async function discoverClient(opts = {}) {
   const ips = buildScanList(localIps);
   const batch = 48;
   for (let i = 0; i < ips.length; i += batch) {
-    report(`기기 검색 중… (${Math.min(i + batch, ips.length)}/${ips.length})`);
+    report(`기기 검색 중… (${Math.min(i + batch, ips.length)}/${ips.length}) · ${found.size}대 발견`);
     const chunk = ips.slice(i, i + batch);
     const results = await Promise.all(chunk.map((ip) => probeClient(ip)));
-    const hit = results.find(Boolean);
-    if (hit) {
-      localStorage.setItem('dshare-client-ip', hit.ip);
-      return hit;
-    }
+    results.filter(Boolean).forEach(addHit);
+    if (found.size >= 3) break;
   }
-  return null;
+  return [...found.values()];
+}
+
+/**
+ * @param {{ onProgress?: (msg: string) => void }} [opts]
+ * @returns {Promise<{ ip: string, code: string, name: string, wsPort: number } | null>}
+ */
+export async function discoverClient(opts = {}) {
+  const all = await discoverAllClients(opts);
+  return all[0] || null;
 }

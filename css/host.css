@@ -442,6 +442,43 @@ md-outlined-text-field {
 
 .panel-hidden { display: none !important; }
 
+.client-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 16px 0 8px;
+  max-width: 360px;
+  width: 100%;
+}
+
+.client-chip {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 16px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font: 500 13px var(--font);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.client-chip span {
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  font-size: 12px;
+}
+
+.client-chip.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
 @media (max-width: 480px) {
   .code-card { padding: 24px 20px; letter-spacing: 0.12em; }
 }

@@ -2,10 +2,12 @@ import { showNameModal, showAlert, openSettings } from './settings-ui.js';
 import { SignalingClient } from './signaling.js';
 import { RtcSession } from './rtc.js';
 import { normalizeCode, isValidCode } from './codes.js';
-import { STORAGE_KEYS, getClientIp, setClientIp } from './util.js';
+import { STORAGE_KEYS } from './util.js';
 import { initIcons } from './icons.js';
 import { ensureM3 } from './m3-setup.js';
-import { discoverClient } from './discovery.js';
+import { discoverAllClients } from './discovery.js';
+
+const MAX_CLIENTS = 3;
 
 const hostApp = document.getElementById('host-app');
 const idlePanel = document.getElementById('idle-panel');
@@ -20,26 +22,15 @@ const codeInput = document.getElementById('code-input');
 const clientIpInput = document.getElementById('client-ip-input');
 const lanHint = document.getElementById('https-hint');
 const discoverStatus = document.getElementById('discover-status');
+const clientListEl = document.getElementById('client-list');
 
-let signaling = null;
-let rtc = null;
 let mediaStream = null;
-let selectedClient = null;
 let hostName = '';
-let peerReadyResolve = null;
 let isSharing = false;
-let handlersBound = false;
-let clientIp = '';
-let discoveredClient = null;
-
-function getCodeValue() {
-  return normalizeCode(codeInput?.value || '');
-}
-
-function getWsUrl() {
-  const ip = clientIp || getClientIp();
-  return ip ? `ws://${ip}:3847` : '';
-}
+let discoveredClients = [];
+const selectedClients = new Map();
+/** @type {Map<string, { signaling: SignalingClient, rtc: RtcSession, meta: object, peerReadyResolve: Function|null }>} */
+const sessions = new Map();
 
 function canShareScreen() {
   return !!(window.isSecureContext && navigator.mediaDevices?.getDisplayMedia);
@@ -52,8 +43,13 @@ function enterSharingUI() {
   livePanel.classList.remove('panel-hidden');
   hostControlBar.classList.remove('panel-hidden');
   sharingTitle.textContent = hostName;
-  sharingTo.textContent = `${selectedClient?.name || '클라이언트'}에게 공유 중`;
+  updateSharingStatus();
   initIcons(hostControlBar);
+}
+
+function updateSharingStatus() {
+  const n = sessions.size;
+  sharingTo.textContent = n > 0 ? `${n}명의 클라이언트에게 공유 중` : '연결 중…';
 }
 
 function exitSharingUI() {
@@ -64,155 +60,185 @@ function exitSharingUI() {
   idlePanel.classList.remove('panel-hidden');
 }
 
-async function waitPeerReady() {
+function renderClientList() {
+  if (!clientListEl) return;
+  clientListEl.innerHTML = '';
+  if (!discoveredClients.length) {
+    clientListEl.innerHTML = '<p class="hint-text" style="margin:8px 0">클라이언트 앱을 실행하면 여기에 표시됩니다.</p>';
+    return;
+  }
+  discoveredClients.forEach((client) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'client-chip' + (selectedClients.has(client.code) ? ' selected' : '');
+    btn.innerHTML = `<strong>${client.name}</strong><span>${client.code}</span>`;
+    btn.onclick = () => toggleClient(client);
+    clientListEl.appendChild(btn);
+  });
+}
+
+function toggleClient(client) {
+  if (selectedClients.has(client.code)) {
+    selectedClients.delete(client.code);
+  } else {
+    if (selectedClients.size >= MAX_CLIENTS) {
+      showAlert('선택 제한', `최대 ${MAX_CLIENTS}명까지 선택할 수 있습니다.`);
+      return;
+    }
+    selectedClients.set(client.code, client);
+  }
+  if (selectedClients.size === 1) {
+    codeInput.value = [...selectedClients.values()][0].code;
+  } else if (selectedClients.size === 0) {
+    codeInput.value = '';
+  }
+  renderClientList();
+  if (lanHint) {
+    lanHint.textContent = selectedClients.size
+      ? `${selectedClients.size}명 선택됨 (최대 ${MAX_CLIENTS}명)`
+      : '목록에서 클라이언트를 선택하세요 (최대 3명)';
+  }
+}
+
+async function autoDiscoverClients() {
+  if (discoverStatus) discoverStatus.textContent = '기기를 찾는 중…';
+  shareBtn.disabled = true;
+  discoveredClients = await discoverAllClients({
+    onProgress: (msg) => { if (discoverStatus) discoverStatus.textContent = msg; },
+  });
+  shareBtn.disabled = false;
+  renderClientList();
+  if (discoveredClients.length) {
+    if (discoveredClients.length === 1) toggleClient(discoveredClients[0]);
+    if (discoverStatus) discoverStatus.textContent = `${discoveredClients.length}대 발견 — 최대 ${MAX_CLIENTS}명 선택`;
+    if (clientIpInput) clientIpInput.style.display = 'none';
+  } else {
+    if (clientIpInput) clientIpInput.style.display = '';
+    if (discoverStatus) discoverStatus.textContent = '자동 검색 실패 — IP와 코드를 직접 입력하세요.';
+  }
+}
+
+function resolveTargets() {
+  if (selectedClients.size) return [...selectedClients.values()];
+  const code = normalizeCode(codeInput?.value || '');
+  const ip = clientIpInput?.value?.trim();
+  if (isValidCode(code) && ip && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) {
+    return [{ code, ip, name: '클라이언트' }];
+  }
+  if (isValidCode(code)) {
+    const found = discoveredClients.find((c) => c.code === code);
+    if (found) return [found];
+  }
+  return [];
+}
+
+function waitPeerReady(session) {
   return new Promise((resolve) => {
-    peerReadyResolve = resolve;
+    session.peerReadyResolve = resolve;
     setTimeout(resolve, 8000);
   });
 }
 
-function bindSignalingHandlers() {
-  if (handlersBound || !signaling) return;
-  handlersBound = true;
+function bindSessionHandlers(session, meta) {
+  const { signaling, code } = session;
   signaling.on('peer-ready', () => {
-    peerReadyResolve?.();
-    peerReadyResolve = null;
+    session.peerReadyResolve?.();
+    session.peerReadyResolve = null;
   });
-  signaling.on('peer-disconnected', () => {
-    stopSharing({ notifyServer: false, showRemoteAlert: true });
-  });
-  signaling.on('client-left', () => {
-    stopSharing({ notifyServer: false, showRemoteAlert: true });
+  signaling.on('peer-disconnected', () => removeSession(code, { notify: false, alert: true }));
+  signaling.on('client-left', (msg) => {
+    if (!msg.code || msg.code.toUpperCase() === code) {
+      removeSession(code, { notify: false, alert: true });
+    }
   });
   signaling.on('error', ({ message }) => showAlert('오류', message));
 }
 
-async function ensureSignaling() {
-  const wsUrl = getWsUrl();
-  if (!wsUrl) throw new Error('클라이언트를 찾지 못했습니다. 클라이언트 앱이 실행 중인지 확인하세요.');
-  if (signaling) signaling.close();
-  signaling = new SignalingClient();
-  bindSignalingHandlers();
-  await signaling.connect(wsUrl);
+async function connectClient(meta) {
+  const code = meta.code.toUpperCase();
+  if (sessions.has(code)) return;
+  const signaling = new SignalingClient();
+  const session = { signaling, rtc: null, meta, peerReadyResolve: null };
+  bindSessionHandlers(session, meta);
+  await signaling.connect(`ws://${meta.ip}:3847`);
   signaling.registerHost(hostName, 'web');
-}
-
-async function autoDiscoverClient() {
-  if (discoverStatus) discoverStatus.textContent = '기기를 찾는 중…';
-  shareBtn.disabled = true;
-
-  discoveredClient = await discoverClient({
-    onProgress: (msg) => { if (discoverStatus) discoverStatus.textContent = msg; },
-  });
-
-  shareBtn.disabled = false;
-
-  if (discoveredClient) {
-    clientIp = discoveredClient.ip;
-    setClientIp(clientIp);
-    if (codeInput) codeInput.value = discoveredClient.code;
-    if (lanHint) {
-      lanHint.innerHTML = `클라이언트 <strong>${discoveredClient.name}</strong> · 코드 <strong>${discoveredClient.code}</strong>`;
+  signaling.connectToClient(code);
+  sessions.set(code, session);
+  await waitPeerReady(session);
+  const rtc = new RtcSession('host', signaling, code);
+  rtc.onConnectionStateChange = (state) => {
+    if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+      removeSession(code, { notify: false });
     }
-    if (discoverStatus) discoverStatus.textContent = '클라이언트를 찾았습니다.';
-    return true;
-  }
-
-  if (clientIpInput) clientIpInput.style.display = '';
-  if (discoverStatus) {
-    discoverStatus.textContent = '자동 검색 실패 — IP와 코드를 입력하세요.';
-  }
-  return false;
+  };
+  session.rtc = rtc;
+  await rtc.addLocalStream(mediaStream);
+  await rtc.createOffer();
 }
 
 async function selectAndShare() {
   if (!canShareScreen()) {
-    showAlert(
-      'HTTPS 필요',
-      '화면 공유는 보안 연결(HTTPS)에서만 가능합니다.\n\nGitHub Pages 주소로 접속하세요:\nhttps://jaewondev27.github.io/d-share-web/',
-    );
+    showAlert('HTTPS 필요', '화면 공유는 GitHub Pages(HTTPS)에서만 가능합니다.\n\nhttps://jaewondev27.github.io/d-share-web/');
     return;
   }
-
-  const normalized = getCodeValue();
-  if (!isValidCode(normalized)) {
-    showAlert('코드 오류', '6자리 영문·숫자 코드를 입력하세요.');
+  const targets = resolveTargets();
+  if (!targets.length) {
+    showAlert('선택 필요', '클라이언트를 선택하거나 IP와 코드를 입력하세요.');
     return;
   }
-
-  if (!clientIp && !getClientIp()) {
-    const manualIp = clientIpInput?.value?.trim();
-    if (manualIp && /^\d{1,3}(\.\d{1,3}){3}$/.test(manualIp)) {
-      clientIp = manualIp;
-      setClientIp(clientIp);
-    } else {
-      await autoDiscoverClient();
+  if (targets.length > MAX_CLIENTS) {
+    showAlert('선택 제한', `최대 ${MAX_CLIENTS}명까지 연결할 수 있습니다.`);
+    return;
+  }
+  try {
+    if (!mediaStream) {
+      mediaStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+      });
+      mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
+        stopSharing({ notifyServer: true });
+      });
     }
-  }
-
-  try {
-    await ensureSignaling();
-    selectedClient = {
-      code: normalized,
-      name: discoveredClient?.name || '클라이언트',
-      ip: clientIp || getClientIp(),
-    };
-    signaling.connectToClient(normalized);
-    await waitPeerReady();
-    await startSharing();
-  } catch (err) {
-    showAlert(
-      '연결 오류',
-      err.message || '클라이언트에 연결할 수 없습니다. Chrome에서「로컬 네트워크 접근」을 허용했는지 확인하세요.',
-    );
-    signaling?.close();
-    signaling = null;
-    handlersBound = false;
-  }
-}
-
-async function startSharing() {
-  if (!selectedClient) return;
-  if (!canShareScreen()) {
-    showAlert('HTTPS 필요', '화면 공유 API를 사용할 수 없습니다. GitHub Pages(HTTPS)에서 열어주세요.');
-    return;
-  }
-  try {
-    mediaStream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: 30 },
-      audio: true,
-    });
-    rtc?.close();
-    rtc = new RtcSession('host', signaling);
-    rtc.onConnectionStateChange = (state) => {
-      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-        stopSharing({ notifyServer: false });
-      }
-    };
-    await rtc.addLocalStream(mediaStream);
-    await rtc.createOffer();
     enterSharingUI();
-    mediaStream.getVideoTracks()[0].addEventListener('ended', () => {
-      stopSharing({ notifyServer: true });
-    });
+    for (const meta of targets) {
+      if (sessions.has(meta.code.toUpperCase())) continue;
+      try {
+        await connectClient(meta);
+      } catch (err) {
+        showAlert('연결 오류', `${meta.name || meta.code}: ${err.message}`);
+      }
+    }
+    updateSharingStatus();
+    if (sessions.size === 0) {
+      stopSharing({ notifyServer: false });
+    }
   } catch (err) {
     if (err.name !== 'NotAllowedError') showAlert('오류', err.message || String(err));
-    signaling?.disconnectPeer();
-    selectedClient = null;
+    stopSharing({ notifyServer: false });
   }
 }
 
-function stopSharing({ notifyServer = true, showRemoteAlert = false } = {}) {
-  if (!isSharing && !mediaStream && !rtc) return;
+function removeSession(code, { notify = true, alert = false } = {}) {
+  const key = code.toUpperCase();
+  const session = sessions.get(key);
+  if (!session) return;
+  if (notify) session.signaling.disconnectPeer(key);
+  session.rtc?.close();
+  session.signaling.close();
+  sessions.delete(key);
+  updateSharingStatus();
+  if (alert && isSharing) {
+    showAlert('연결 종료', `${session.meta.name || key} 연결이 끊어졌습니다.`);
+  }
+  if (isSharing && sessions.size === 0) exitSharingUI();
+}
+
+function stopSharing({ notifyServer = true } = {}) {
   mediaStream?.getTracks().forEach((t) => t.stop());
   mediaStream = null;
-  rtc?.close();
-  rtc = null;
-  if (notifyServer) signaling?.disconnectPeer();
+  [...sessions.keys()].forEach((code) => removeSession(code, { notify: notifyServer, alert: false }));
   exitSharingUI();
-  selectedClient = null;
-  peerReadyResolve = null;
-  if (showRemoteAlert) showAlert('연결 종료', '클라이언트 연결이 끊어졌습니다.');
 }
 
 function setupInputs() {
@@ -233,19 +259,13 @@ document.getElementById('settings-btn').addEventListener('click', () => {
     onNameChange: (name) => {
       hostName = name;
       hostNameDisplay.textContent = name;
-      signaling?.registerHost(name, 'web');
+      sessions.forEach((s) => s.signaling.registerHost(name, 'web'));
     },
   });
 });
 
 async function init() {
   await ensureM3();
-
-  clientIp = getClientIp();
-  if (clientIp && lanHint) {
-    lanHint.textContent = `저장된 클라이언트: ${clientIp}`;
-  }
-
   hostName = await showNameModal({
     storageKey: STORAGE_KEYS.hostName,
     title: '이름 설정',
@@ -255,15 +275,11 @@ async function init() {
   hostNameDisplay.textContent = hostName;
   setupInputs();
   initIcons(document.body);
-
   if (!canShareScreen()) {
-    showAlert(
-      'HTTPS 필요',
-      '이 페이지는 HTTP로 열려 화면 공유가 불가합니다.\n\nGitHub Pages에서 이용하세요:\nhttps://jaewondev27.github.io/d-share-web/',
-    );
+    showAlert('HTTPS 필요', 'GitHub Pages에서 이용하세요:\nhttps://jaewondev27.github.io/d-share-web/');
   }
-
-  await autoDiscoverClient();
+  if (lanHint) lanHint.textContent = `목록에서 클라이언트 선택 (최대 ${MAX_CLIENTS}명)`;
+  await autoDiscoverClients();
 }
 
 init().catch((err) => showAlert('시작 오류', err.message));

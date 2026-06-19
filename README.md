@@ -1,4 +1,4 @@
-﻿# D-Share Web Host
+# D-Share Web Host
 
 LAN 전용 웹 호스트 — **별도 서버 없음**
 

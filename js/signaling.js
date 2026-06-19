@@ -90,20 +90,20 @@ export class SignalingClient {
     this.send('connect', { code });
   }
 
-  sendOffer(sdp) {
-    this.send('offer', { sdp });
+  sendOffer(sdp, code) {
+    this.send('offer', { sdp, ...(code ? { code } : {}) });
   }
 
-  sendAnswer(sdp) {
-    this.send('answer', { sdp });
+  sendAnswer(sdp, code) {
+    this.send('answer', { sdp, ...(code ? { code } : {}) });
   }
 
-  sendIceCandidate(candidate) {
-    this.send('ice-candidate', { candidate });
+  sendIceCandidate(candidate, code) {
+    this.send('ice-candidate', { candidate, ...(code ? { code } : {}) });
   }
 
-  disconnectPeer() {
-    this.send('disconnect-peer');
+  disconnectPeer(code) {
+    this.send('disconnect-peer', code ? { code } : {});
   }
 
   sendPeerReady() {
