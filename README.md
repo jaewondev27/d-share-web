@@ -1,19 +1,19 @@
 ﻿# D-Share Web Host
 
-GitHub Pages web host for D-Share screen sharing.
+LAN 전용 웹 호스트 — **별도 서버 없음**
 
-## URL
+## GitHub Pages (이 페이지)
 
 https://jaewondev27.github.io/d-share-web/
 
-## Usage
+1. 클라이언트 앱 실행
+2. 앱에 표시된 **IP** 입력 → 웹 호스트 열기
+3. **6자리 코드** 입력 → 화면 공유
 
-1. Run the D-Share **client** app on Android and note the 6-digit code
-2. Open the web host URL above
-3. Enter the code and click **Start sharing**
+## 직접 접속 (권장)
 
-Uses WSS relay: `wss://d-share-signaling.onrender.com`
+클라이언트 앱에 표시된 주소를 PC/태블릿 브라우저에서 열기:
 
-## Enable GitHub Pages
+`http://클라이언트IP:3849/`
 
-Repository **Settings → Pages → Build and deployment → GitHub Actions**
+같은 Wi-Fi · 코드만 입력 · 릴레이/클라우드 서버 불필요
